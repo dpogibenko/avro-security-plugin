@@ -4,6 +4,7 @@ import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.ipc.RPCContext;
 import org.apache.avro.ipc.RPCPlugin;
 import org.apache.avro.security.Authentication;
@@ -42,7 +43,7 @@ import static java.lang.String.format;
  */
 public class AuthenticationPlugin extends RPCPlugin {
 
-    private static Utf8 AuthenticationKey = new Utf8("security.credentials");
+    private static String AuthenticationKey = "security.credentials";
 
     private Logger log = LoggerFactory.getLogger(getClass());
 
@@ -56,15 +57,15 @@ public class AuthenticationPlugin extends RPCPlugin {
 
     private ThreadLocal<Object> ticketStorage = new ThreadLocal<Object>();
 
-    private Utf8 username;
+    private String username;
 
-    private Utf8 password;
+    private String password;
 
     private final Ticket NO_TICKET ;
     
     public AuthenticationPlugin() {
         NO_TICKET = new Ticket();
-        NO_TICKET.digest = ByteBuffer.allocate(0);        
+        NO_TICKET.setDigest(ByteBuffer.allocate(0));
     }
 
     /**
@@ -73,7 +74,7 @@ public class AuthenticationPlugin extends RPCPlugin {
      * @param username
      */
     public void setUsername(String username) {
-        this.username = new Utf8(username);
+        this.username = username;
     }
 
     /**
@@ -83,7 +84,7 @@ public class AuthenticationPlugin extends RPCPlugin {
      */
     public void setPassword(String password) throws Exception {
         if (password != null) {
-            this.password = new Utf8(password);
+            this.password = password;
         }
     }
 
@@ -100,13 +101,13 @@ public class AuthenticationPlugin extends RPCPlugin {
             if (ticket == null) {
                 Credentials credentials = new Credentials();
                 assertCredentialsArePresent();
-                credentials.username = username;
-                credentials.password = password;
+                credentials.setUsername(username);
+                credentials.setPassword(password);
                 logCredentials(credentials);
-                auth.data = credentials;
+                auth.setData(credentials);
             } else {
                 logTicket(ticket);
-                auth.data = ticket;
+                auth.setData(ticket);
             }
             writeAuthenticationToMetadata(context.requestCallMeta(), auth);
         } catch (IOException e) {
@@ -125,11 +126,12 @@ public class AuthenticationPlugin extends RPCPlugin {
         }
     }
 
-    private void writeAuthenticationToMetadata(Map<CharSequence, ByteBuffer> metadata,
-            Authentication auth) throws IOException {
+    private void writeAuthenticationToMetadata(Map<String, ByteBuffer> metadata,
+                                               Authentication auth) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        BinaryEncoder encoder = new BinaryEncoder(out);
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
         authenticationWriter.write(auth, encoder);
+        encoder.flush();
         metadata.put(AuthenticationKey, ByteBuffer.wrap(out.toByteArray()));
     }
 
@@ -144,22 +146,20 @@ public class AuthenticationPlugin extends RPCPlugin {
         Authentication response = readAuthenticationFromMetadata(context.requestCallMeta());
 
         if (strategy != null) {
-            if (response.data instanceof Ticket) {
-                Ticket ticket = (Ticket) response.data;
+            if (response.getData() instanceof Ticket) {
+                Ticket ticket = (Ticket) response.getData();
                 logTicket(ticket);
                 strategy.verifyTicket(ticket, context.getMessage());
-            } else if (response.data instanceof Credentials) {
-                Credentials credentials = (Credentials) response.data;
+            } else if (response.getData() instanceof Credentials) {
+                Credentials credentials = (Credentials) response.getData();
                 logCredentials(credentials);
                 Ticket ticket = null;
-                ticket = strategy.authenticate(credentials.username, credentials.password,
+                ticket = strategy.authenticate(credentials.getUsername(), credentials.getPassword(),
                         context.getMessage());
                 if (ticket != null) {
                     logTicket(ticket);
                     ticketStorage.set(ticket);
-                } else {
-                    ticket = NO_TICKET;
-                }                
+                }
             } else {
                 throw new AuthenticationException("No Credentials or ticket in Authentication.");
             }
@@ -176,8 +176,8 @@ public class AuthenticationPlugin extends RPCPlugin {
      */
     public void clientReceiveResponse(RPCContext context) {
         Authentication auth = readAuthenticationFromMetadata(context.responseCallMeta());
-        if (!NO_TICKET.equals(auth.data)) {
-            ticketStorage.set(auth.data);
+        if (!NO_TICKET.equals(auth.getData())) {
+            ticketStorage.set(auth.getData());
         }
     }
 
@@ -189,9 +189,9 @@ public class AuthenticationPlugin extends RPCPlugin {
      */
     public void serverSendResponse(RPCContext context) {
         Authentication auth = new Authentication();
-        auth.data = ticketStorage.get();
-        if (auth.data == null) {
-            auth.data = NO_TICKET;
+        auth.setData(ticketStorage.get());
+        if (auth.getData() == null) {
+            auth.setData(NO_TICKET);
         }
         try {
             writeAuthenticationToMetadata(context.responseCallMeta(), auth);
@@ -200,15 +200,14 @@ public class AuthenticationPlugin extends RPCPlugin {
         }
     }
 
-    private Authentication readAuthenticationFromMetadata(Map<CharSequence, ByteBuffer> metadata) {
-        ByteBuffer buffer = metadata.get(AuthenticationKey);
+    private Authentication readAuthenticationFromMetadata(Map<String, ByteBuffer> metadata) {
+        ByteBuffer buffer = metadata.get(new Utf8(AuthenticationKey));
         if (buffer == null) {
             throw new AvroRuntimeException(
                     "No Authentication metadata present. "
                             + "Insure the Security plugin has been included in both requestor and responder");
         }
-        BinaryDecoder decoder = DecoderFactory.defaultFactory().createBinaryDecoder(
-                new ByteBufferBackedInputStream(buffer), null);
+        BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(new ByteBufferBackedInputStream(buffer), null);
 
         Authentication auth = null;
         try {
@@ -221,15 +220,15 @@ public class AuthenticationPlugin extends RPCPlugin {
 
     private void logCredentials(Credentials credentials) {
         if (log.isDebugEnabled()) {
-            log.debug(format("Processing credentials for '%s' and '%s'", credentials.username,
-                    credentials.password));
+            log.debug(format("Processing credentials for '%s' and '%s'", credentials.getUsername(),
+                    credentials.getPassword()));
         }
     }
 
     private void logTicket(Ticket ticket) {
         if (log.isDebugEnabled()) {
             log.debug(format("Using security ticket '%s' ",
-                    new String(Hex.encode(ticket.digest.array()))));
+                    new String(Hex.encode(ticket.getDigest().array()))));
         }
     }
 

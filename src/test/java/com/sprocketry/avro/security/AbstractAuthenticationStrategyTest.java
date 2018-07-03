@@ -4,8 +4,8 @@ import static org.junit.Assert.assertEquals;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.ipc.LocalTransceiver;
-import org.apache.avro.specific.SpecificRequestor;
-import org.apache.avro.specific.SpecificResponder;
+import org.apache.avro.ipc.specific.SpecificRequestor;
+import org.apache.avro.ipc.specific.SpecificResponder;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.beans.factory.annotation.Autowired;
